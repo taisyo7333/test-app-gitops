@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: test-app
+  namespace: test-app
+  labels:
+    app: test-app
+    backstage.io/kubernetes-id: test-app
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  to:
+    kind: Service
+    name: test-app
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

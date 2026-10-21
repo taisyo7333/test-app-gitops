@@ -1,0 +1,148 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-app-build-and-push
+  namespace: test-app
+  labels:
+    app: test-app
+    backstage.io/kubernetes-id: test-app
+    demo.cf/part-of: provision
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  params:
+    - name: GIT_URL
+      type: string
+      default: "https://github.com/taisyo7333/test-app.git"
+    - name: GITOPS_URL
+      type: string
+      default: "https://github.com/taisyo7333/test-app-gitops.git"
+    - name: IMAGE
+      type: string
+      default: image-registry.openshift-image-registry.svc:5000/test-app/test-app:latest
+    - name: APP_NAME
+      type: string
+      default: test-app
+    - name: STACK_NAME
+      type: string
+      default: test-app-test-app
+    - name: BUCKET_NAME
+      type: string
+      default: test-app-202610
+    - name: OIDC_PROVIDER
+      type: string
+      default: "oidc.op1.openshiftapps.com/2ti6a40j1pkcg1npggsje9573la622sr"
+    - name: NAMESPACE
+      type: string
+      default: test-app
+    - name: SERVICE_ACCOUNT
+      type: string
+      default: test-app
+    - name: ROLE_NAME
+      type: string
+      default: s3read-test-app-test-app
+    - name: OBJECT_KEY
+      type: string
+      default: message.txt
+  workspaces:
+    - name: source
+    - name: cfn
+    - name: git-auth
+  tasks:
+    - name: clone-gitops
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: git-clone
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: URL
+          value: $(params.GITOPS_URL)
+        - name: DELETE_EXISTING
+          value: "true"
+      workspaces:
+        - name: output
+          workspace: cfn
+        - name: basic-auth
+          workspace: git-auth
+    - name: clone-source
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: git-clone
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: URL
+          value: $(params.GIT_URL)
+        - name: DELETE_EXISTING
+          value: "true"
+      workspaces:
+        - name: output
+          workspace: source
+        - name: basic-auth
+          workspace: git-auth
+    - name: cloudformation
+      runAfter: [clone-gitops]
+      taskRef:
+        name: test-app-cloudformation-deploy
+      params:
+        - name: STACK_NAME
+          value: $(params.STACK_NAME)
+        - name: BUCKET_NAME
+          value: $(params.BUCKET_NAME)
+        - name: OIDC_PROVIDER
+          value: $(params.OIDC_PROVIDER)
+        - name: NAMESPACE
+          value: $(params.NAMESPACE)
+        - name: SERVICE_ACCOUNT
+          value: $(params.SERVICE_ACCOUNT)
+        - name: ROLE_NAME
+          value: $(params.ROLE_NAME)
+        - name: OBJECT_KEY
+          value: $(params.OBJECT_KEY)
+      workspaces:
+        - name: source
+          workspace: cfn
+    - name: build
+      runAfter: [clone-source]
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: buildah
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE)
+        - name: TLS_VERIFY
+          value: "false"
+      workspaces:
+        - name: source
+          workspace: source
+    - name: rollout
+      runAfter: [build, cloudformation]
+      taskRef:
+        resolver: cluster
+        params:
+          - name: kind
+            value: task
+          - name: name
+            value: openshift-client
+          - name: namespace
+            value: openshift-pipelines
+      params:
+        - name: SCRIPT
+          value: |
+            oc rollout restart deployment/$(params.APP_NAME)
+            oc rollout status deployment/$(params.APP_NAME) --timeout=300s

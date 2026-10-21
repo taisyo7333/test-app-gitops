@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: test-app
+  labels:
+    app: test-app
+    backstage.io/kubernetes-id: test-app
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 2
+  progressDeadlineSeconds: 1800
+  selector:
+    matchLabels:
+      app: test-app
+  template:
+    metadata:
+      labels:
+        app: test-app
+        backstage.io/kubernetes-id: test-app
+    spec:
+      serviceAccountName: test-app
+      containers:
+        - name: app
+          image: image-registry.openshift-image-registry.svc:5000/test-app/test-app:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: APP_NAME
+              value: test-app
+            - name: NAMESPACE
+              value: test-app
+            - name: S3_BUCKET
+              value: test-app-202610
+            - name: S3_OBJECT_KEY
+              value: message.txt
+            - name: AWS_REGION
+              value: ap-northeast-1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10

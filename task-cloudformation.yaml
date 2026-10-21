@@ -1,0 +1,66 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: test-app-cloudformation-deploy
+  namespace: test-app
+  labels:
+    app: test-app
+    demo.cf/part-of: provision
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  params:
+    - name: STACK_NAME
+      type: string
+    - name: BUCKET_NAME
+      type: string
+    - name: OIDC_PROVIDER
+      type: string
+    - name: NAMESPACE
+      type: string
+    - name: SERVICE_ACCOUNT
+      type: string
+    - name: ROLE_NAME
+      type: string
+    - name: OBJECT_KEY
+      type: string
+  workspaces:
+    - name: source
+  steps:
+    - name: deploy
+      image: public.ecr.aws/aws-cli/aws-cli:2.22.35
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-cfn
+              key: accessKeyId
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-cfn
+              key: secretAccessKey
+        - name: AWS_DEFAULT_REGION
+          valueFrom:
+            secretKeyRef:
+              name: aws-cfn
+              key: region
+      script: |
+        #!/bin/sh
+        set -eu
+        aws cloudformation deploy \
+          --stack-name "$(params.STACK_NAME)" \
+          --template-file "$(workspaces.source.path)/cloudformation/s3-reader.yaml" \
+          --parameter-overrides \
+            BucketName="$(params.BUCKET_NAME)" \
+            OidcProvider="$(params.OIDC_PROVIDER)" \
+            Namespace="$(params.NAMESPACE)" \
+            ServiceAccountName="$(params.SERVICE_ACCOUNT)" \
+            RoleName="$(params.ROLE_NAME)" \
+            ObjectKey="$(params.OBJECT_KEY)" \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --no-fail-on-empty-changeset
+        aws cloudformation describe-stacks \
+          --stack-name "$(params.STACK_NAME)" \
+          --query "Stacks[0].Outputs" \
+          --output table

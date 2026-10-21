@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DEMO S3 bucket and IRSA role for one provisioned application.
+Parameters:
+  BucketName:
+    Type: String
+    Description: Globally unique S3 bucket name entered at provision time.
+  OidcProvider:
+    Type: String
+    Description: ROSA STS OIDC provider host without the https:// prefix.
+  Namespace:
+    Type: String
+  ServiceAccountName:
+    Type: String
+  RoleName:
+    Type: String
+    Description: Fixed name s3read-<namespace>-<app> so the ServiceAccount annotation can match before the stack finishes.
+  ObjectKey:
+    Type: String
+    Default: message.txt
+Resources:
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  ReaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      AssumeRolePolicyDocument:
+        Fn::Sub:
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Federated": "arn:aws:iam::${AWS::AccountId}:oidc-provider/${OidcProvider}"
+                  },
+                  "Action": "sts:AssumeRoleWithWebIdentity",
+                  "Condition": {
+                    "StringEquals": {
+                      "${OidcProvider}:sub": "system:serviceaccount:${Namespace}:${ServiceAccountName}"
+                    }
+                  }
+                }
+              ]
+            }
+          - OidcProvider: !Ref OidcProvider
+            Namespace: !Ref Namespace
+            ServiceAccountName: !Ref ServiceAccountName
+      Policies:
+        - PolicyName: read-object
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${BucketName}/${ObjectKey}"
+Outputs:
+  BucketName:
+    Value: !Ref Bucket
+  RoleArn:
+    Value: !GetAtt ReaderRole.Arn
